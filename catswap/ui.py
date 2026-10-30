@@ -13,7 +13,7 @@ import sys
 
 EMPTY = {"last_node_id": 0, "last_link_id": 0, "nodes": [], "links": [], "groups": [],
          "config": {}, "extra": {}, "version": 0.4}
-CATALOG = ["--where", "local", "--host", "127.0.0.1", "--port", os.environ.get("COMFY_UI_PORT", "8189")]
+CATALOG = ["--where", "local", "--host", os.environ.get("COMFY_UI_HOST", "127.0.0.1"), "--port", os.environ.get("COMFY_UI_PORT", "8189")]
 
 
 def op(*args):

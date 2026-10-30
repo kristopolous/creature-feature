@@ -1,0 +1,11 @@
+[project]
+name = "creature-feature"
+version = "0.1.0"
+description = "Swap anyone in a movie scene for a real-behaving animal. A ComfyUI App on open models: d1, SAM3, FLUX 3 Klein, LTX-2.5."
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["transformers", "yt-dlp"]
+
+[project.urls]
+Repository = "https://github.com/kristopolous/creature-feature"
