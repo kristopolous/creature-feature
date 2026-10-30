@@ -60,3 +60,10 @@ def ask(model, frame, who):
                                "width": max(1, round((b["right"] - b["left"]) * w)),
                                "height": max(1, round((b["bottom"] - b["top"]) * h))}
     return float(ans["present"]["noul"]), bbox, ans["posture"]["choice"]
+
+
+def ask_choice(model, frame, question, criteria):
+    with torch.inference_mode():
+        ans = model.system_one(None, {"q": {"type": "choice", "instructions": question, "criteria": criteria}},
+                               media=[to_pil(frame)])["answers"]
+    return ans["q"]["choice"]

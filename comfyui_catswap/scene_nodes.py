@@ -16,6 +16,7 @@ from .starters import MY_VIDEO, STARTERS, ANIMAL_IDEAS, parse_swaps
 
 Shot = io.Custom("CATSWAP_SHOT")
 ShotResult = io.Custom("CATSWAP_RESULT")
+Spans = io.Custom("CATSWAP_SPANS")
 
 
 def ffmpeg_exe():
@@ -141,7 +142,8 @@ class CatSwapScenePlan(io.ComfyNode):
                 io.Float.Input("min_present", default=0.8, min=0.0, max=1.0,
                                tooltip="d1's confidence that the character is in the shot."),
             ],
-            outputs=[Shot.Output(display_name="shots", is_output_list=True), io.String.Output(display_name="plan")],
+            outputs=[Shot.Output(display_name="shots", is_output_list=True), io.String.Output(display_name="plan"),
+                     Spans.Output(display_name="spans", tooltip="[start, end) frames of every swapped shot.")],
         )
 
     @classmethod
@@ -174,10 +176,16 @@ class CatSwapScenePlan(io.ComfyNode):
                 lines.append(f"shot {i:2d}  frames {a:4d}-{b:4d}  " +
                              (f"{best['who']} -> {best['animal']}  ({best['present']}, {best['posture']})"
                               if best else "-"))
+            voice = "shot"
+            if shots:  # whose voice to silence: d1 on the frame where the character was clearest
+                best = max(shots, key=lambda x: x["present"])
+                woman = d1.ask_choice(model, images[(best["start"] + best["end"]) // 2],
+                                      f"Is {best['who']} a man or a woman?", {"man": "A man", "woman": "A woman"})
+                voice = "high" if woman == "woman" else "low"
         finally:
             d1.free(model)
-        plan = f"{len(pieces)} shots, {len(shots)} to swap\n" + "\n".join(lines)
-        return io.NodeOutput(shots, plan)
+        plan = f"{len(pieces)} shots, {len(shots)} to swap, muting the {voice} voice\n" + "\n".join(lines)
+        return io.NodeOutput(shots, plan, {"spans": [[s["start"], s["end"]] for s in shots], "voice": voice})
 
 
 class CatSwapShot(io.ComfyNode):
@@ -244,4 +252,117 @@ class CatSwapAssemble(io.ComfyNode):
         return io.NodeOutput(out)
 
 
-NODES = [CatSwapStarter, CatSwapScenePlan, CatSwapShot, CatSwapShotResult, CatSwapAssemble]
+class CatSwapMuteVoice(io.ComfyNode):
+    """Animals don't talk. Splits the soundtrack with HDemucs (torchaudio) into vocals and everything else, and fades
+    the vocals out during the swapped shots: in shot/reverse-shot dialog the person on screen is the one talking.
+    Music, room tone and everyone else's lines stay."""
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="CatSwapMuteVoice",
+            display_name="CatSwap Mute Voice",
+            category="catswap",
+            description="Silence the animal's lines: vocals are separated (HDemucs) and faded out during the swapped "
+                        "shots; music, ambience and the other actors' lines in other shots are untouched.",
+            inputs=[io.Audio.Input("audio"), Spans.Input("spans"),
+                    io.Float.Input("fps", default=12.0, min=1.0, max=240.0, force_input=True),
+                    io.Float.Input("fade", default=0.08, min=0.0, max=1.0, tooltip="Seconds of fade at each edge."),
+                    io.Boolean.Input("enabled", default=True)],
+            outputs=[io.Audio.Output(display_name="audio")],
+        )
+
+    @classmethod
+    def execute(cls, audio, spans, fps, fade, enabled) -> io.NodeOutput:
+        voice = spans.get("voice", "shot") if isinstance(spans, dict) else "shot"
+        spans = spans.get("spans", []) if isinstance(spans, dict) else spans
+        if not enabled or audio is None or not spans:
+            return io.NodeOutput(audio)
+        import torchaudio
+        import comfy.model_management as mm
+        wav, sr = audio["waveform"][0].float(), audio["sample_rate"]  # [C, T]
+        bundle = torchaudio.pipelines.HDEMUCS_HIGH_MUSDB_PLUS
+        x = torchaudio.functional.resample(wav, sr, bundle.sample_rate) if sr != bundle.sample_rate else wav
+        x = x.expand(2, -1) if x.shape[0] == 1 else x[:2]
+        device = mm.get_torch_device()
+        model = bundle.get_model().to(device).eval()
+        try:
+            vocals = separate_vocals(model, x, bundle.sample_rate, device)
+        finally:
+            del model
+            mm.soft_empty_cache()
+        if sr != bundle.sample_rate:
+            vocals = torchaudio.functional.resample(vocals, bundle.sample_rate, sr)
+        vocals = vocals[:, :wav.shape[1]]
+        if wav.shape[0] == 1:
+            vocals = vocals.mean(0, keepdim=True)
+        n = wav.shape[1]
+        gain = torch.ones(n)
+        f = max(1, int(fade * sr))
+        for a, b in spans:
+            s0, s1 = int(a / fps * sr), min(n, int(b / fps * sr))
+            if s1 <= s0:
+                continue
+            gain[s0:s1] = 0
+            lo, hi = max(0, s0 - f), min(n, s1 + f)
+            gain[lo:s0] = torch.minimum(gain[lo:s0], torch.linspace(1, 0, s0 - lo))
+            gain[s1:hi] = torch.minimum(gain[s1:hi], torch.linspace(0, 1, hi - s1))
+        if voice in ("high", "low"):  # two people in one shot: only mute the swapped character's side of ~165 Hz
+            gain = torch.maximum(gain, 1 - voice_mask(vocals, sr, voice, f))
+        out = wav - vocals * (1 - gain)  # = everything else + vocals * gain
+        return io.NodeOutput({**audio, "waveform": out[None].to(audio["waveform"].dtype)})
+
+
+def voice_mask(vocals, sr, voice, fade, split_hz=165.0):
+    """1 where the separated vocals are voiced speech on the given side of split_hz (high = typically a woman's
+    voice, low = a man's), smoothed over ~0.3 s; 0 elsewhere. Same length as the audio."""
+    import torchaudio
+    mono = torchaudio.functional.resample(vocals.mean(0), sr, 16000)
+    hop = 160  # 10 ms
+    pitch = torchaudio.functional.detect_pitch_frequency(mono[None], 16000, frame_time=0.01, win_length=30,
+                                                         freq_low=70, freq_high=400)[0]
+    frames = mono[: len(mono) // hop * hop].reshape(-1, hop)
+    energy = frames.pow(2).mean(1).sqrt()
+    n = min(len(pitch), len(energy))
+    pitch, energy = pitch[:n], energy[:n]
+    voiced = energy > max(1e-4, 0.15 * float(energy.max()))
+    side = pitch > split_hz if voice == "high" else pitch <= split_hz
+    m = (voiced & side).float()
+    k = 31  # ~0.3 s majority vote, then grow a little so syllable edges are covered
+    m = (F.avg_pool1d(m[None, None], k, stride=1, padding=k // 2)[0, 0] > 0.5).float()
+    m = F.max_pool1d(m[None, None], 11, stride=1, padding=5)[0, 0]
+    k = 2 * max(1, int(fade / sr / 0.01) // 2) + 1  # soft edges, smoothed at the 10 ms frame rate
+    m = F.avg_pool1d(m[None, None], k, stride=1, padding=k // 2, count_include_pad=False)[0, 0]
+    return F.interpolate(m[None, None], size=vocals.shape[-1], mode="linear")[0, 0].clamp(0, 1)
+
+
+def separate_vocals(model, x, sr, device, segment=10.0, overlap=0.1):
+    """torchaudio's chunked HDemucs recipe: normalize, separate in overlapping segments with linear fades."""
+    from torchaudio.transforms import Fade
+    ref = x.mean(0)
+    mean, std = ref.mean(), ref.std() + 1e-8
+    x = ((x - mean) / std)[None].to(device)
+    length = x.shape[-1]
+    chunk = int(sr * segment * (1 + overlap))
+    ov = int(overlap * sr)
+    fade = Fade(fade_in_len=0, fade_out_len=ov, fade_shape="linear")
+    out = torch.zeros(1, len(model.sources), 2, length, device=device)
+    start, end = 0, chunk
+    with torch.inference_mode():
+        while start < length - ov:
+            piece = x[:, :, start:end]
+            y = fade(model(piece))
+            out[:, :, :, start:start + y.shape[-1]] += y
+            if start == 0:
+                fade.fade_in_len = ov
+                start += int(chunk - ov)
+            else:
+                start += chunk
+            end += chunk
+            if end >= length:
+                fade.fade_out_len = 0
+    vocals = out[0, model.sources.index("vocals")]
+    return (vocals * std + mean).cpu()
+
+
+NODES = [CatSwapStarter, CatSwapScenePlan, CatSwapShot, CatSwapShotResult, CatSwapAssemble, CatSwapMuteVoice]

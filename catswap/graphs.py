@@ -224,7 +224,7 @@ def app(video="input.mp4", who="the man in the brown suit", animal="cat", scene=
 
 
 def scene_app(starter="The Social Network: the breakup", swaps="", video="input.mp4", seed=1, height=192,
-              target_fps=12.0, max_frames=721, klein_scale=2.0, prefix="catswap/scene"):
+              target_fps=12.0, max_frames=721, klein_scale=2.0, prefix="catswap/scene", mute=True):
     """The scene App: a starter scene (or an upload) + "who = animal" lines in, the whole scene out with every shot
     of those characters swapped, over the original audio. d1 plans the shots; the per-shot pipeline runs inside
     ComfyUI's core Start Loop / End Loop (List mode) with every model loaded once, outside the loop."""
@@ -299,6 +299,9 @@ def scene_app(starter="The Social Network: the breakup", swaps="", video="input.
     end = g.add("EndLoop", output_value=result(), accumulate=True)
 
     scene = g.add("CatSwapAssemble", images=fit(0), results=end())
-    video_out = g.add("CreateVideo", images=scene(), fps=fit(2), audio=fit(3))
+    audio = fit(3)
+    if mute:  # animals don't talk
+        audio = g.add("CatSwapMuteVoice", audio=fit(3), spans=plan(2), fps=fit(2), fade=0.08, enabled=True)()
+    video_out = g.add("CreateVideo", images=scene(), fps=fit(2), audio=audio)
     g.add("SaveVideo", video=video_out(), filename_prefix=prefix, format="auto", **{"format.codec": "auto"})
     return g

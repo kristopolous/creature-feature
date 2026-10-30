@@ -1,6 +1,7 @@
 """Starter scenes for the App: famous shot / reverse-shot dialog, where the back-and-forth across cuts is the joke.
 Clips are fetched whole at runtime (never committed), at the lowest resolution YouTube offers; the App's Trim Video
 picks the part to swap (the first 60 s by default).
+ONE character per scene becomes an animal; everyone else stays human and doesn't react. That's the joke.
 Swaps describe what is VISIBLE ("the bald man with glasses"), not roles ("Walter"): that is what d1 can see."""
 
 STARTERS = {
@@ -9,7 +10,7 @@ STARTERS = {
         "swaps": "the young man in the gray hoodie = cat"},
     "Pulp Fiction: Royale with Cheese": {
         "url": "https://www.youtube.com/watch?v=6Pkq_eBHXJ4",
-        "swaps": "the man with long dark hair in a ponytail = dog\nthe man with curly hair and sideburns = goose"},
+        "swaps": "the man with long dark hair in a ponytail = dog"},
     "Breaking Bad: I am the one who knocks": {
         "url": "https://www.youtube.com/watch?v=Ca3kPemW2CE",
         "swaps": "the bald man with a goatee = cat"},
@@ -21,7 +22,7 @@ STARTERS = {
         "swaps": "the blonde girl in the pink jacket = goose"},
     "Casablanca: As Time Goes By": {
         "url": "https://www.youtube.com/watch?v=a_paHK6JdHA",
-        "swaps": "the woman in the white dress = cat\nthe man in the white jacket and bow tie = parrot"},
+        "swaps": "the woman in the white dress = cat"},
 }
 MY_VIDEO = "my video (upload)"
 
