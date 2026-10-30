@@ -4,4 +4,4 @@
 export MIOPEN_FIND_MODE=FAST  # skip most of the per-shape conv kernel search (first LTX run took 17 min without it)
 cd $HOME/cat/ComfyUI && echo $$ > $HOME/cat/comfy.pid && exec $HOME/cat/venv/bin/python main.py \
   --listen 127.0.0.1,100.127.67.47 --port 8188 --output-directory $HOME/cat/output --input-directory $HOME/cat/input \
-  --extra-model-paths-config $HOME/cat/extra_models.yaml --use-pytorch-cross-attention --cache-none --fast-disk  # the scene loop keeps ~50 GB of models live on a 62 GB box: offload to disk, not RAM
+  --extra-model-paths-config $HOME/cat/extra_models.yaml --use-pytorch-cross-attention --cache-none --fast-disk --reserve-vram 3  # the scene loop keeps ~50 GB of models live on a 62 GB box: offload to disk, not RAM

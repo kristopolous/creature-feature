@@ -102,6 +102,8 @@ class CatSwapMaskNoiseMask(io.ComfyNode):
         return io.NodeOutput(out)
 
 
+WEB_DIRECTORY = "./web"  # App Mode welcome screen for our workflows
+
 from . import d1, place  # noqa: E402  (place.py is shared with the CLI via a symlink)
 from .scene_nodes import NODES as SCENE_NODES  # noqa: E402
 

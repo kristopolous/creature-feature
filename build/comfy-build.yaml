@@ -2,7 +2,7 @@ schema: comfy-build/1
 id: 13361de7-ecb4-4252-aca8-6d5a771566e0
 name: creature-feature
 description: 'Creature Feature: swap anyone in a movie scene for a real-behaving animal (d1, SAM3, FLUX 3 Klein, LTX-2.5).'
-syncedRevision: '2026-10-30T10:22:15.564514Z'
+syncedRevision: '2026-10-30T10:53:45.124938Z'
 definition:
   schema: distribution-definition/0
   baseComfyVersion: b5a432157de6b8884f81104cd02926adf4d597e4
@@ -44,5 +44,7 @@ definition:
     name: creature-feature
     repository: https://github.com/kristopolous/creature-feature
   pipDependencies: 'yt-dlp==2026.10.26
+
+    imageio-ffmpeg==0.7.0
 
     '

@@ -10,6 +10,11 @@ MODEL = "LiquidAI/d1-2B"
 
 
 def load():
+    import shutil
+    import transformers.utils
+    import transformers.utils.import_utils
+    if not (shutil.which("cc") or shutil.which("gcc")):  # Comfy cloud workers: no compiler, so Triton JIT fails
+        transformers.utils.is_triton_available = transformers.utils.import_utils.is_triton_available = lambda: False
     from transformers import AutoModel
     import comfy.model_management as mm
     device = mm.get_torch_device()

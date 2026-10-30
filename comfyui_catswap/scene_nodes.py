@@ -18,22 +18,52 @@ Shot = io.Custom("CATSWAP_SHOT")
 ShotResult = io.Custom("CATSWAP_RESULT")
 
 
+def ffmpeg_exe():
+    """System ffmpeg, else the one imageio-ffmpeg ships (Comfy cloud workers have none)."""
+    import shutil
+    if shutil.which("ffmpeg"):
+        return shutil.which("ffmpeg")
+    import imageio_ffmpeg
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def has_video(path):
+    import av
+    try:
+        with av.open(path) as c:
+            return bool(c.streams.video)
+    except Exception:
+        return False
+
+
 def fetch_starter(name):
+    """The starter's clip, cached in input/catswap_starters/. A starter's `mirror` (a plain https mp4) is tried first:
+    YouTube refuses datacenter IPs such as Comfy cloud workers. Otherwise yt-dlp at the LOWEST resolution."""
     s = STARTERS[name]
     vid = s["url"].rsplit("=", 1)[-1]
     out_dir = os.path.join(folder_paths.get_input_directory(), "catswap_starters")
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{vid}.mp4")
-    if not os.path.exists(path):
-        subprocess.run([sys.executable, "-m", "yt_dlp", "-q", "--no-warnings", "--force-overwrites",
-                        "-f", "worstvideo[height>=144]+worstaudio/worst[height>=144][vcodec!=none]",  # LOWEST res
-                        "--merge-output-format", "mp4",
-                        "-o", path, s["url"]], check=True)
-        probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=index",
-                                "-of", "csv=p=0", path], capture_output=True, text=True).stdout.strip()
-        if not probe:
-            os.remove(path)
-            raise RuntimeError(f"{name}: the download has no video stream")
+    if os.path.exists(path) and has_video(path):
+        return path
+    mirror = os.environ.get("CATSWAP_STARTER_MIRROR", "").rstrip("/")
+    for url in ([f"{mirror}/{vid}.mp4"] if mirror else []) + ([s["mirror"]] if s.get("mirror") else []):
+        try:
+            import urllib.request
+            urllib.request.urlretrieve(url, path)
+            if has_video(path):
+                return path
+        except Exception:
+            pass
+    subprocess.run([sys.executable, "-m", "yt_dlp", "-q", "--no-warnings", "--force-overwrites",
+                    "--ffmpeg-location", ffmpeg_exe(),
+                    # LOWEST resolution, https only: HLS (m3u8) downloads crawl
+                    "-f", "worstvideo[height>=144][protocol=https]+worstaudio[protocol=https]"
+                          "/worst[height>=144][vcodec!=none][protocol=https]",
+                    "--merge-output-format", "mp4", "-o", path, s["url"]], check=True)
+    if not has_video(path):
+        os.remove(path)
+        raise RuntimeError(f"{name}: the download has no video stream")
     return path
 
 
