@@ -12,3 +12,4 @@ NOTES.md
 ctxt.txt
 workflows/ref/
 workflows/cameo_*
+build/*.json

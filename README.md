@@ -4,9 +4,41 @@
 
 Ilsa in *Casablanca* becomes a tabby cat who looks around the room while "Play it, Sam" plays over it. Sam becomes a parrot on the piano bench. You type who to replace and which animal ("cat", "parrot", "camel", "a fluffy white goat"), and the app does the rest.
 
-It is a **ComfyUI App**: one workflow in App mode with four inputs (**video, who, animal, scene**) and the swapped video as its output. Everything runs on **open-weight models** on one consumer GPU (tested on an RX 7900 XTX, 24 GB, ROCm).
+It is a **ComfyUI App**. Everything runs on **open-weight models** on one consumer GPU (tested on an RX 7900 XTX, 24 GB, ROCm). There are two workflows:
+
+- **Creature Feature - Scene** (`workflows/catswap_scene.json`), the main one. Pick a **starter scene** or upload your own, **trim** it, and list the swaps one per line (`the young man in the gray hoodie = cat`). The App finds every cut, asks a decision model which character is in each shot, swaps them shot by shot, and rebuilds the whole scene over the original audio. The joke is the back-and-forth across cuts.
+- **CatSwap** (`workflows/catswap_app.json`), one shot at a time: video, who, animal, scene.
+
+### Starter scenes
+
+All are shot/reverse-shot dialog with a static camera. They are fetched at runtime at the lowest resolution and never committed to the repo.
+
+| Starter | Suggested swaps | d1's plan (first 60 s) |
+|---|---|---|
+| The Social Network: the breakup | the young man in the gray hoodie = cat | 6 of 17 shots, alternating with Erica |
+| Casablanca: As Time Goes By | the woman in the white dress = cat, the man in the white jacket and bow tie = parrot | 8 of 8, cat ↔ parrot |
+| Breaking Bad: I am the one who knocks | the bald man with a goatee = cat | 3 of 9 |
+| Succession: Boar on the Floor | the old man with white hair = camel | 4 of 14 |
+| Mean Girls: You can't sit with us | the blonde girl in the pink jacket = goose | 4 of 22 |
+| Pulp Fiction: Royale with Cheese | the man with long dark hair in a ponytail = dog, the man with curly hair and sideburns = goose | 2 of 4 |
+
+Animal ideas: cat, dog, parrot, goose, camel, llama, capybara, penguin, goat, raccoon, corgi, owl, alpaca, pig, rabbit, duck, hedgehog. Or anything else; FLUX 3 Klein draws whatever you name.
 
 ## How it works
+
+**Scene mode** wraps the per-shot pipeline below in ComfyUI's core **Start Loop / End Loop** (List mode):
+
+```
+Starter / upload ─► Trim Video ─► Fit Frames ─► CatSwap Scene Plan (d1) ─► Start Loop ─► [per-shot pipeline] ─► End Loop ─► Assemble ─► video
+                    (core,         (lowest res)   cuts + "who is in this      one item per                         (accumulate)   swapped shots
+                     visual)                       shot?" for every shot       shot to swap                                         over the original
+```
+
+- **Cut detection** divides each frame-to-frame luma jump by the frames' brightness. That way it works in a dark bar (*The Social Network*: cuts jump about 8 at luma 14) and in a bright black-and-white film (*Casablanca*: about 45 at luma 72), while motion stays under about 0.06. Flashes shorter than 6 frames are merged into the shot they interrupt.
+- **d1 runs once per shot, for every swap line,** on the GPU in bf16. It answers in one forward pass, so planning a 60 s scene takes about 10 s. The model is freed before the video models load.
+- **Every model loads once,** outside the loop. Each loop iteration is one shot.
+
+The per-shot pipeline (also the whole single-shot **CatSwap** App):
 
 ```
 video ─► Fit Frames ─► d1 decision model ──► SAM3 ──► Plan ──► FLUX 3 Klein ×2 ──► LTX-2.5 ──► Composite ─► video
@@ -38,6 +70,10 @@ video ─► Fit Frames ─► d1 decision model ──► SAM3 ──► Plan �
 | CatSwap Mask Noise Mask | Pixel mask to a video-latent `noise_mask` (temporal ×8, max-pooled, dilated, frame 0 frozen). |
 | Cameo Box Noise Mask | The same idea with boxes instead of a mask. |
 | CatSwap Composite | Pastes the generated frames over the original inside a feathered region. |
+| CatSwap Starter Scene | Starter dropdown (fetched with yt-dlp) or your upload, plus the suggested swaps. |
+| CatSwap Scene Plan (d1) | Finds cuts and asks d1 who is in each shot. Emits one item per shot to swap, for Start Loop. |
+| CatSwap Shot / Shot Result | The loop body's entry (shot frames, first frame, decision) and exit. |
+| CatSwap Assemble Scene | Puts the swapped shots back into the original scene. |
 
 ## Setup
 
@@ -62,11 +98,11 @@ pip install transformers  # for the d1 decision model
 python main.py --cache-none
 ```
 
-Then load `workflows/catswap_app.json`. It opens in **App mode**. Upload a clip of one shot (static camera works best), type **who** ("the woman in the white dress") and **animal**, and run.
+Also `pip install yt-dlp` for the starter scenes. Then load `workflows/catswap_scene.json` (scene mode) or `workflows/catswap_app.json` (single shot). Both open in **App mode**. Upload a clip of one shot (static camera works best), type **who** ("the woman in the white dress") and **animal**, and run.
 
 **Tips:**
 - **Describe what's visible, not the character's role.** "the man in the white jacket and bow tie" finds Sam at 0.99 confidence; "the piano player" scores 0.2.
-- **One shot per run.** The app stops at the first cut. To do a whole scene, split it with the CLI below and run each shot.
+- **Single-shot App:** it stops at the first cut. Use the Scene App for anything with cuts.
 - **First run on AMD:** MIOpen tunes kernels for each new shape, which can take a while. Set `MIOPEN_FIND_MODE=FAST`. After that, LTX takes seconds per shot.
 
 ## CLI (development harness)

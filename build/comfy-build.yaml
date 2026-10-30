@@ -1,0 +1,48 @@
+schema: comfy-build/1
+id: null
+name: creature-feature
+description: 'Creature Feature: swap anyone in a movie scene for a real-behaving animal (d1, SAM3, FLUX 3 Klein, LTX-2.5).'
+syncedRevision: null
+definition:
+  schema: distribution-definition/0
+  baseComfyVersion: b5a432157de6b8884f81104cd02926adf4d597e4
+  models:
+  - type: checkpoints
+    filename: sam3.1_multiplex_fp16.safetensors
+    sourceUri: https://huggingface.co/Comfy-Org/sam3.1/resolve/main/checkpoints/sam3.1_multiplex_fp16.safetensors
+    sha256: 9ba99c92703c2e8b4f47de2d34a539bb8e18923049e238b780d70dbe6368eb03
+  - type: vae
+    filename: flux2-vae.safetensors
+    sourceUri: https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors
+    sha256: d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5
+  - type: vae
+    filename: ltx-2.5-video-vae-bf16.safetensors
+    sourceUri: https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors
+    sha256: 847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3
+  - type: vae
+    filename: ltx-2.5-audio-vae-bf16.safetensors
+    sourceUri: https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors
+    sha256: c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5
+  - type: text_encoders
+    filename: gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
+    sourceUri: https://huggingface.co/Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
+    sha256: 6ce688a0aa98a5fa36a9f1e6c3f42152a498cc2b53ee8c15674c64244f91487f
+  - type: diffusion_models
+    filename: ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
+    sourceUri: https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
+    sha256: c4279eeff115cbeaca494bd2183e7d768c38fe85a184dc6afbb7159157c44334
+  - type: diffusion_models
+    filename: flux3-image-klein-int8-convrot.safetensors
+    sourceUri: https://huggingface.co/ml-resources/flux-3-image-klein-comfy/resolve/main/diffusion_models/flux3-image-klein-int8-convrot.safetensors
+    sha256: 847d8933548afd93df4af2cac2498e70891bf28d9dae06d695f536992e168fe2
+  - type: text_encoders
+    filename: qwen3vl_4b_int8_convrot.safetensors
+    sourceUri: https://huggingface.co/ml-resources/flux-3-image-klein-comfy/resolve/main/text_encoders/qwen3vl_4b_int8_convrot.safetensors
+    sha256: 32de113cbf8282b02cbff0794b637b9d6676da09314a1db5a30bcea9bf4ee01c
+  customNodes:
+  - name: creature-feature
+    repository: https://github.com/kristopolous/creature-feature
+    gitRef: COMMIT
+  pipDependencies: 'yt-dlp
+
+    '

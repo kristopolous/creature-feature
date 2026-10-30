@@ -52,9 +52,12 @@ def convert(api, path):
 APP_INPUTS = [("LoadVideo", "file"), ("CatSwapFindCharacter", "who"), ("CatSwapPlan", "animal"),
               ("CatSwapPlan", "scene")]
 APP_OUTPUTS = ["SaveVideo"]
+SCENE_INPUTS = [("CatSwapStarter", "starter"), ("CatSwapStarter", "swaps"), ("VideoTrim", "trim"),
+                ("LoadVideo", "file")]
+SCENE_OUTPUTS = ["SaveVideo", "PreviewAny"]
 
 
-def make_app(api, path):
+def make_app(api, path, inputs=APP_INPUTS, outputs=APP_OUTPUTS):
     """Convert, then switch the workflow into App (linear) mode with the App's inputs and outputs."""
     ids = convert(api, path)
     by_type = {}
@@ -62,13 +65,19 @@ def make_app(api, path):
         by_type.setdefault(node["class_type"], ids[nid])
     wf = json.load(open(path))
     wf.setdefault("extra", {})["linearMode"] = True
-    wf["extra"]["linearData"] = {"inputs": [[by_type[t], w] for t, w in APP_INPUTS],
-                                 "outputs": [by_type[t] for t in APP_OUTPUTS]}
+    wf["extra"]["linearData"] = {"inputs": [[by_type[t], w] for t, w in inputs],
+                                 "outputs": [by_type[t] for t in outputs]}
     json.dump(wf, open(path, "w"), indent=1)
     return path
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if a != "--app"]
-    (make_app if "--app" in sys.argv else convert)(json.load(open(args[0])), args[1])
+    args = [a for a in sys.argv[1:] if a not in ("--app", "--scene")]
+    api = json.load(open(args[0]))
+    if "--scene" in sys.argv:
+        make_app(api, args[1], SCENE_INPUTS, SCENE_OUTPUTS)
+    elif "--app" in sys.argv:
+        make_app(api, args[1])
+    else:
+        convert(api, args[1])
     print("wrote", args[1])

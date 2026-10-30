@@ -221,3 +221,84 @@ def app(video="input.mp4", who="the man in the brown suit", animal="cat", scene=
     video_out = g.add("CreateVideo", images=final(), fps=fit(2), audio=fit(3))
     g.add("SaveVideo", video=video_out(), filename_prefix=prefix, format="auto", **{"format.codec": "auto"})
     return g
+
+
+def scene_app(starter="The Social Network: the breakup", swaps="", video="input.mp4", seed=1, height=192,
+              target_fps=12.0, max_frames=721, klein_scale=2.0, prefix="catswap/scene"):
+    """The scene App: a starter scene (or an upload) + "who = animal" lines in, the whole scene out with every shot
+    of those characters swapped, over the original audio. d1 plans the shots; the per-shot pipeline runs inside
+    ComfyUI's core Start Loop / End Loop (List mode) with every model loaded once, outside the loop."""
+    g = Graph()
+    # video=None (API/cloud runs from a starter) leaves the upload node out: its file must exist on the worker
+    upload = {"video": g.add("LoadVideo", file=video)()} if video else {}
+    start = g.add("CatSwapStarter", starter=starter, swaps=swaps, **upload)
+    trim = g.add("VideoTrim", video=start(0), trim={"trim": {"start_time": 0.0, "duration": 0.0}},
+                 strict_duration=False)  # core's visual trim editor: pick the part of the scene to swap
+    comp = g.add("GetVideoComponents", video=trim())
+    fit = g.add("CatSwapFitFrames", images=comp(0), fps=comp(2), audio=comp(1), height=height,
+                target_fps=target_fps, max_frames=max_frames, cut_threshold=0.0)  # whole scene: keep the cuts
+    plan = g.add("CatSwapScenePlan", images=fit(0), swaps=start(1), cut_threshold=0.15, min_shot_frames=6, max_shot_frames=161,
+                 min_present=0.8)
+    g.add("PreviewAny", source=plan(1))
+
+    # every model loads once, outside the loop
+    sam = g.add("CheckpointLoaderSimple", ckpt_name=SAM3)
+    unet = g.add("UNETLoader", unet_name=KLEIN, weight_dtype="default")
+    kclip = g.add("CLIPLoader", clip_name=KLEIN_TE, type="flux3", device="default")
+    kvae = g.add("VAELoader", vae_name=FLUX_VAE)
+    kneg = g.add("CLIPTextEncode", clip=kclip(), text="")
+    vae = g.add("VAELoader", vae_name=LTX_VAE)
+    avae = g.add("VAELoader", vae_name=LTX_AUDIO_VAE)
+    clip = g.add("CLIPLoader", clip_name=LTX_TE, type="ltxv", device="default")
+    neg = g.add("CLIPTextEncode", clip=clip(), text=NEGATIVE)
+    model = g.add("UNETLoader", unet_name=LTX, weight_dtype="default")
+
+    loop = g.add("StartLoop", mode="List", **{"mode.list": plan(0)}, cache_iterations=False)
+    shot = g.add("CatSwapShot", images=fit(0), shot=loop(3))
+    # who -> SAM3 person track (d1's box picks which one)
+    sam_text = g.add("CLIPTextEncode", clip=sam(1), text=shot(3))
+    det = g.add("SAM3_Detect", model=sam(0), image=shot(1), conditioning=sam_text(), bboxes=shot(6), threshold=0.5,
+                refine_iterations=2, individual_masks=False)
+    track = g.add("SAM3_VideoTrack", images=shot(0), model=sam(0), initial_mask=det(0),
+                  detection_threshold=0.5, max_objects=1, detect_interval=1)
+    masks = g.add("SAM3_TrackToMask", track_data=track(), object_indices="0")
+    p = g.add("CatSwapPlan", masks=masks(), who=shot(3), animal=shot(4), size=0.0, posture=shot(5), scene="",
+              grow=6)
+    # frame 0: Klein removes the person, then adds the animal
+    big = g.add("ImageScaleBy", image=shot(1), upscale_method="lanczos", scale_by=klein_scale)
+    size = g.add("GetImageSize", image=big())
+    kmodel = g.add("ModelSamplingFlux", model=unet(), max_shift=math.log(16.0), base_shift=math.log(16.0),
+                   width=size(0), height=size(1))
+    klat = g.add("EmptyFlux2LatentImage", width=size(0), height=size(1), batch_size=1)
+
+    def klein_pass(prompt, image):
+        pos = g.add("CLIPTextEncode", clip=kclip(), text=prompt)
+        ref = g.add("ReferenceMultiLatent", positive=pos(), negative=kneg(), vae=kvae(), resolution="resize",
+                    **{"resolution.megapixels": 0.07, "images.image0": image})
+        ks = g.add("KSampler", model=kmodel(), seed=seed, steps=16, cfg=1.0, sampler_name="euler",
+                   scheduler="simple", positive=ref(0), negative=ref(1), latent_image=klat(), denoise=1.0)
+        return g.add("VAEDecode", samples=ks(), vae=kvae())
+
+    swapped = klein_pass(p(1), klein_pass(p(0), big())())
+    window = g.add("CatSwapSetFirstFrame", images=shot(0), first=swapped())
+    # the shot: LTX-2.5 regenerates only the person's region
+    lat = g.add("VAEEncode", pixels=window(), vae=vae())
+    masked = g.add("CatSwapMaskNoiseMask", latent=lat(), mask=p(3), temporal_scale=8, dilate=1, keep_frames=1)
+    alat = g.add("LTXVEmptyLatentAudio", frames_number=shot(2), frame_rate=fit(2), batch_size=1, audio_vae=avae())
+    av = g.add("LTXVConcatAVLatent", video_latent=masked(), audio_latent=alat())
+    pos = g.add("CLIPTextEncode", clip=clip(), text=p(2))
+    cond = g.add("LTXVConditioning", positive=pos(), negative=neg(), frame_rate=fit(2))
+    guider = g.add("CFGGuider", model=model(), positive=cond(0), negative=cond(1), cfg=1.0)
+    out = g.add("SamplerCustomAdvanced", noise=g.add("RandomNoise", noise_seed=seed)(), guider=guider(),
+                sampler=g.add("KSamplerSelect", sampler_name="euler_ancestral")(),
+                sigmas=g.add("ManualSigmas", sigmas=LTX_SIGMAS)(), latent_image=av())
+    sep = g.add("LTXVSeparateAVLatent", av_latent=out(0))
+    gen = g.add("VAEDecode", samples=sep(0), vae=vae())
+    final = g.add("CatSwapComposite", original=shot(0), generated=gen(), region=p(3), feather=2)
+    result = g.add("CatSwapShotResult", shot=loop(3), images=final())
+    end = g.add("EndLoop", output_value=result(), accumulate=True)
+
+    scene = g.add("CatSwapAssemble", images=fit(0), results=end())
+    video_out = g.add("CreateVideo", images=scene(), fps=fit(2), audio=fit(3))
+    g.add("SaveVideo", video=video_out(), filename_prefix=prefix, format="auto", **{"format.codec": "auto"})
+    return g

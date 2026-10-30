@@ -1,8 +1,6 @@
 """ComfyUI-CatSwap: swap one character in a video for a real-behaving animal. Everything else, including the
 dialog audio, stays the original footage."""
-import importlib.util
 import json
-import os
 
 import torch
 import torch.nn.functional as F
@@ -104,12 +102,9 @@ class CatSwapMaskNoiseMask(io.ComfyNode):
         return io.NodeOutput(out)
 
 
-# place.py (pure geometry/text) is shared with the CLI; loaded under a unique name to avoid clashing with other packs.
-_spec = importlib.util.spec_from_file_location("catswap_place", os.path.join(os.path.dirname(__file__), "place.py"))
-place = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(place)
+from . import d1, place  # noqa: E402  (place.py is shared with the CLI via a symlink)
+from .scene_nodes import NODES as SCENE_NODES  # noqa: E402
 
-_MODELS = {}
 POSTURES = ["standing", "sitting", "walking", "lying"]
 
 
@@ -144,34 +139,15 @@ class CatSwapFindCharacter(io.ComfyNode):
 
     @classmethod
     def execute(cls, image, who, posture_override) -> io.NodeOutput:
-        import numpy as np
-        from PIL import Image
-        # One decision per run, so load, decide, free: the App also holds LTX, Gemma, Klein and SAM3, and
-        # caching d1 (7 GB in fp32) pushed a 62 GB box into the OOM killer.
-        os.environ.setdefault("HF_HUB_OFFLINE", "1")
-        from transformers import AutoModel
-        _MODELS["d1"] = AutoModel.from_pretrained("LiquidAI/d1-2B", trust_remote_code=True,
-                                                  dtype=torch.bfloat16).to("cpu").eval()
-        frame = Image.fromarray((image[0, ..., :3].cpu().numpy() * 255).round().astype(np.uint8))
-        qs = {
-            "present": {"type": "noul", "instructions": f"Is {who} visible in this image?"},
-            "where": {"type": "box", "instructions": f"Where is {who}? Box their whole visible body."},
-            "posture": {"type": "choice", "instructions": f"What is {who} doing with their body?",
-                        "criteria": {"standing": "Standing still or talking on their feet",
-                                     "sitting": "Sitting on a chair, sofa, bench or in a car",
-                                     "walking": "Walking or moving through the scene",
-                                     "lying": "Lying down"}},
-        }
-        with torch.inference_mode():
-            ans = _MODELS.pop("d1").system_one(None, qs, media=[frame])["answers"]
-        import gc
-        gc.collect()
+        model = d1.load()
+        try:
+            present, bbox, posture = d1.ask(model, image[0], who)
+        finally:
+            d1.free(model)
         h, w = image.shape[1], image.shape[2]
-        b = ans.get("where", {}).get("box") or {"top": 0, "left": 0, "bottom": 1, "right": 1}
-        bbox = {"x": round(b["left"] * w), "y": round(b["top"] * h),
-                "width": max(1, round((b["right"] - b["left"]) * w)), "height": max(1, round((b["bottom"] - b["top"]) * h))}
-        posture = ans["posture"]["choice"] if posture_override == "auto" else posture_override
-        return io.NodeOutput(bbox, posture, float(ans["present"]["noul"]), who)
+        bbox = bbox or {"x": 0, "y": 0, "width": w, "height": h}
+        posture = posture if posture_override == "auto" else posture_override
+        return io.NodeOutput(bbox, posture, present, who)
 
 
 class CatSwapFitFrames(io.ComfyNode):
@@ -331,7 +307,7 @@ class CatSwapExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         return [CameoBoxNoiseMask, CatSwapMaskNoiseMask, CatSwapFindCharacter, CatSwapFitFrames, CatSwapPlan,
-                CatSwapSetFirstFrame, CatSwapComposite]
+                CatSwapSetFirstFrame, CatSwapComposite, *SCENE_NODES]
 
 
 async def comfy_entrypoint() -> CatSwapExtension:
