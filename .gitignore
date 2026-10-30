@@ -1,0 +1,14 @@
+work/
+.venv/
+ComfyUI/
+*.mp4
+*.mkv
+*.webm
+__pycache__/
+.env
+.venv
+# local-only: working notes, the forked session transcript (contains an API key), inherited/reference workflows
+NOTES.md
+ctxt.txt
+workflows/ref/
+workflows/cameo_*
