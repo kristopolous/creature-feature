@@ -2,7 +2,7 @@
  "1": {
   "class_type": "LoadVideo",
   "inputs": {
-   "file": "casa_shot2.mp4"
+   "file": "casa_shot5.mp4"
   }
  },
  "2": {
@@ -53,7 +53,7 @@
     "4",
     0
    ],
-   "who": "the man in the white jacket and bow tie",
+   "who": "the woman in the white dress",
    "posture_override": "auto"
   }
  },
@@ -141,7 +141,7 @@
     "5",
     3
    ],
-   "animal": "parrot",
+   "animal": "cat",
    "size": 0.0,
    "posture": [
     "5",
@@ -652,7 +652,7 @@
     "48",
     0
    ],
-   "filename_prefix": "catswap/app_parrot",
+   "filename_prefix": "catswap/app",
    "format": "auto",
    "format.codec": "auto"
   }
